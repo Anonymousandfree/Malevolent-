@@ -3,6 +3,8 @@ Example usage of the Security Stack feature
 Demonstrates security event tracking, backlogging, and trace elements
 """
 
+import tempfile
+import os
 from security_stack import (
     SecurityStack,
     SecurityEvent,
@@ -199,7 +201,8 @@ def main():
     print("=" * 60)
     print("Exporting Events")
     print("=" * 60)
-    export_file = "/tmp/security_events.json"
+    # Use platform-independent temporary directory
+    export_file = os.path.join(tempfile.gettempdir(), "security_events.json")
     stack.export_to_json(export_file)
     print(f"Events exported to: {export_file}")
     print()

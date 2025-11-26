@@ -6,6 +6,7 @@ Tests security event tracking, backlogging, and trace elements
 import unittest
 import json
 import os
+import tempfile
 from datetime import datetime
 from security_stack import (
     SecurityStack,
@@ -244,20 +245,25 @@ class TestSecurityStack(unittest.TestCase):
         """Test exporting events to JSON"""
         self.stack.push(self._create_test_event())
         
-        filepath = "/tmp/test_export.json"
-        self.stack.export_to_json(filepath)
+        # Use tempfile for cross-platform compatibility
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+            filepath = tmp.name
         
-        self.assertTrue(os.path.exists(filepath))
-        
-        with open(filepath, 'r') as f:
-            data = json.load(f)
-        
-        self.assertIn('metadata', data)
-        self.assertIn('stack', data)
-        self.assertIn('backlog', data)
-        
-        # Cleanup
-        os.remove(filepath)
+        try:
+            self.stack.export_to_json(filepath)
+            
+            self.assertTrue(os.path.exists(filepath))
+            
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+            
+            self.assertIn('metadata', data)
+            self.assertIn('stack', data)
+            self.assertIn('backlog', data)
+        finally:
+            # Cleanup
+            if os.path.exists(filepath):
+                os.remove(filepath)
     
     def test_clear_operations(self):
         """Test clear operations"""
