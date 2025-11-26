@@ -105,7 +105,6 @@ class SecurityStack:
         self._backlog: List[SecurityEvent] = []
         self._event_count = 0
         self._trace_enabled = True
-        self._max_size_tracker = max_size
     
     def push(self, event: SecurityEvent) -> bool:
         """
@@ -113,7 +112,7 @@ class SecurityStack:
         Returns True if successful, False if stack is full
         """
         # Check if we're at capacity and will overflow
-        if len(self._stack) >= self._max_size_tracker:
+        if len(self._stack) >= self.max_size:
             # Move oldest event (leftmost) to backlog
             oldest = self._stack.popleft()
             self._move_to_backlog(oldest)

@@ -205,6 +205,7 @@ def main():
     export_file = os.path.join(tempfile.gettempdir(), "security_events.json")
     stack.export_to_json(export_file)
     print(f"Events exported to: {export_file}")
+    print(f"Note: Example file is retained for inspection. Delete manually if desired.")
     print()
     
     print("=" * 60)
