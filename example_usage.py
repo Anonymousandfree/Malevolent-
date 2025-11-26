@@ -125,7 +125,7 @@ def main():
     print("Current Stack Status")
     print("=" * 60)
     print(f"Stack: {stack}")
-    print(f"Total events processed: {stack._event_count}")
+    print(f"Total events processed: {stack.get_total_event_count()}")
     print()
     
     # Peek at the most recent event

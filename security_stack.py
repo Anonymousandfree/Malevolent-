@@ -5,8 +5,9 @@ Provides security event tracking, backlogging, and trace elements for security h
 
 import json
 import time
+from collections import deque
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Deque
 from enum import Enum
 
 
@@ -100,19 +101,22 @@ class SecurityStack:
     
     def __init__(self, max_size: int = 1000):
         self.max_size = max_size
-        self._stack: List[SecurityEvent] = []
+        self._stack: Deque[SecurityEvent] = deque(maxlen=max_size)
         self._backlog: List[SecurityEvent] = []
         self._event_count = 0
         self._trace_enabled = True
+        self._max_size_tracker = max_size
     
     def push(self, event: SecurityEvent) -> bool:
         """
         Push a security event onto the stack
         Returns True if successful, False if stack is full
         """
-        if len(self._stack) >= self.max_size:
-            # Move oldest event to backlog
-            self._move_to_backlog(self._stack.pop(0))
+        # Check if we're at capacity and will overflow
+        if len(self._stack) >= self._max_size_tracker:
+            # Move oldest event (leftmost) to backlog
+            oldest = self._stack.popleft()
+            self._move_to_backlog(oldest)
         
         self._stack.append(event)
         self._event_count += 1
@@ -152,11 +156,11 @@ class SecurityStack:
     
     def get_stack(self) -> List[SecurityEvent]:
         """Get all events currently in the stack"""
-        return self._stack.copy()
+        return list(self._stack)
     
     def get_all_events(self) -> List[SecurityEvent]:
         """Get all events (stack + backlog)"""
-        return self._backlog + self._stack
+        return self._backlog + list(self._stack)
     
     def filter_by_type(self, event_type: SecurityEventType) -> List[SecurityEvent]:
         """Filter events by type"""
@@ -172,6 +176,10 @@ class SecurityStack:
         """Filter events by source IP"""
         all_events = self.get_all_events()
         return [e for e in all_events if e.source_ip == source_ip]
+    
+    def get_total_event_count(self) -> int:
+        """Get total number of events processed (including those moved to backlog)"""
+        return self._event_count
     
     def get_trace_summary(self) -> Dict[str, Any]:
         """Get summary of all trace data"""
