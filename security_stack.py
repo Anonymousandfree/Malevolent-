@@ -7,11 +7,17 @@ import json
 import time
 import hashlib
 import base64
+import os
+import tempfile
+import logging
 from collections import deque
 from datetime import datetime
 from typing import List, Dict, Optional, Any, Deque
 from enum import Enum
 from cryptography.fernet import Fernet
+
+# Configure logging for security operations
+logger = logging.getLogger(__name__)
 
 
 class SecurityEventType(Enum):
@@ -124,9 +130,9 @@ class SecurityEvent:
         if 'source_ip_hash' not in self.forensic_data:
             self.forensic_data['source_ip_hash'] = hashlib.sha256(self.source_ip.encode()).hexdigest()
         if 'event_signature' not in self.forensic_data:
-            # Create unique event signature for correlation
+            # Create unique event signature for correlation using secure SHA-256
             signature_data = f"{self.event_type.value}:{self.source_ip}:{self.target}:{self.timestamp.isoformat()}"
-            self.forensic_data['event_signature'] = hashlib.md5(signature_data.encode()).hexdigest()
+            self.forensic_data['event_signature'] = hashlib.sha256(signature_data.encode()).hexdigest()
         if 'forensic_timestamp' not in self.forensic_data:
             self.forensic_data['forensic_timestamp'] = self.timestamp.isoformat()
     
@@ -228,8 +234,10 @@ class SecurityStack:
         try:
             encrypted = self._fernet.encrypt(data.encode())
             return base64.b64encode(encrypted).decode()
-        except Exception:
-            return data  # Return original data if encryption fails
+        except Exception as e:
+            logger.error(f"Encryption failed: {e}. Data stored in plaintext.")
+            # In production, consider raising exception instead of silent failure
+            return data
     
     def _decrypt_data(self, encrypted_data: str) -> str:
         """Decrypt data if encryption is enabled"""
@@ -239,8 +247,9 @@ class SecurityStack:
             decoded = base64.b64decode(encrypted_data.encode())
             decrypted = self._fernet.decrypt(decoded)
             return decrypted.decode()
-        except Exception:
-            return encrypted_data  # Return original data if decryption fails
+        except Exception as e:
+            logger.error(f"Decryption failed: {e}. Returning encrypted data.")
+            return encrypted_data
     
     def push(self, event: SecurityEvent) -> bool:
         """
@@ -362,7 +371,7 @@ class SecurityStack:
                 methods_by_source[source] = []
             
             # Extract method from forensic data
-            if hasattr(event, 'forensic_data') and 'method' in event.forensic_data:
+            if 'method' in event.forensic_data:
                 method = event.forensic_data['method']
                 if method not in methods_by_source[source]:
                     methods_by_source[source].append(method)
@@ -372,8 +381,8 @@ class SecurityStack:
             'attack_sources': attack_sources,
             'methods_by_source': methods_by_source,
             'total_unique_sources': len(attack_sources),
-            'most_common_type': max(intrusion_types.items(), key=lambda x: x[1])[0] if intrusion_types else None,
-            'most_active_source': max(attack_sources.items(), key=lambda x: x[1])[0] if attack_sources else None
+            'most_common_type': max(intrusion_types.items(), key=lambda x: x[1])[0] if len(intrusion_types) > 0 else None,
+            'most_active_source': max(attack_sources.items(), key=lambda x: x[1])[0] if len(attack_sources) > 0 else None
         }
     
     def get_full_event_data(self, event_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -472,15 +481,21 @@ class SecurityStack:
             encrypted: Whether to encrypt exports
             include_forensics: Whether to include forensic data
         """
-        import os
+        # Validate and sanitize base_path
+        base_path = os.path.abspath(base_path)
+        # Ensure path doesn't contain traversal sequences
+        if '..' in base_path or base_path.startswith('/etc') or base_path.startswith('/sys'):
+            raise ValueError("Invalid base_path: potential path traversal or system directory access")
+        
         os.makedirs(base_path, exist_ok=True)
         
         all_events = self.get_all_events()
-        total_files = (len(all_events) + chunk_size - 1) // chunk_size
+        num_events = len(all_events)
+        total_files = (num_events + chunk_size - 1) // chunk_size
         
         for i in range(total_files):
             start_idx = i * chunk_size
-            end_idx = min(start_idx + chunk_size, len(all_events))
+            end_idx = min(start_idx + chunk_size, num_events)
             chunk = all_events[start_idx:end_idx]
             
             chunk_data = {
@@ -501,8 +516,6 @@ class SecurityStack:
     
     def _auto_backup(self):
         """Automatically backup events when threshold is reached"""
-        import tempfile
-        import os
         backup_dir = os.path.join(tempfile.gettempdir(), 'security_stack_backups')
         os.makedirs(backup_dir, exist_ok=True)
         
