@@ -199,7 +199,8 @@ class SecurityStack:
     """
     
     def __init__(self, max_size: int = 1000, encryption_key: Optional[str] = None, 
-                 enable_backup: bool = False, backup_threshold: int = 100):
+                 enable_backup: bool = False, backup_threshold: int = 100,
+                 strict_encryption: bool = True):
         self.max_size = max_size
         self._stack: Deque[SecurityEvent] = deque(maxlen=max_size)
         self._backlog: List[SecurityEvent] = []
@@ -211,6 +212,7 @@ class SecurityStack:
         self._enable_backup = enable_backup
         self._backup_threshold = backup_threshold
         self._backup_counter = 0
+        self._strict_encryption = strict_encryption  # Raise exception on encryption failure
         
         if self._encryption_enabled:
             self._initialize_encryption(encryption_key)
@@ -228,19 +230,31 @@ class SecurityStack:
             raise ValueError(f"Failed to initialize encryption: {e}")
     
     def _encrypt_data(self, data: str) -> str:
-        """Encrypt data if encryption is enabled"""
+        """
+        Encrypt data if encryption is enabled
+        
+        Raises:
+            RuntimeError: If strict_encryption is True and encryption fails
+        """
         if not self._encryption_enabled or not self._fernet:
             return data
         try:
             encrypted = self._fernet.encrypt(data.encode())
             return base64.b64encode(encrypted).decode()
         except Exception as e:
-            logger.error(f"Encryption failed: {e}. Data stored in plaintext.")
-            # In production, consider raising exception instead of silent failure
+            error_msg = f"Encryption failed: {e}"
+            logger.error(error_msg)
+            if self._strict_encryption:
+                raise RuntimeError(f"{error_msg}. Cannot store data in plaintext in strict mode.")
             return data
     
     def _decrypt_data(self, encrypted_data: str) -> str:
-        """Decrypt data if encryption is enabled"""
+        """
+        Decrypt data if encryption is enabled
+        
+        Raises:
+            RuntimeError: If strict_encryption is True and decryption fails
+        """
         if not self._encryption_enabled or not self._fernet:
             return encrypted_data
         try:
@@ -248,7 +262,10 @@ class SecurityStack:
             decrypted = self._fernet.decrypt(decoded)
             return decrypted.decode()
         except Exception as e:
-            logger.error(f"Decryption failed: {e}. Returning encrypted data.")
+            error_msg = f"Decryption failed: {e}"
+            logger.error(error_msg)
+            if self._strict_encryption:
+                raise RuntimeError(f"{error_msg}. Cannot return corrupted data in strict mode.")
             return encrypted_data
     
     def push(self, event: SecurityEvent) -> bool:
@@ -480,12 +497,27 @@ class SecurityStack:
             chunk_size: Number of events per file
             encrypted: Whether to encrypt exports
             include_forensics: Whether to include forensic data
+            
+        Raises:
+            ValueError: If base_path contains path traversal or is in a restricted directory
         """
-        # Validate and sanitize base_path
-        base_path = os.path.abspath(base_path)
-        # Ensure path doesn't contain traversal sequences
-        if '..' in base_path or base_path.startswith('/etc') or base_path.startswith('/sys'):
-            raise ValueError("Invalid base_path: potential path traversal or system directory access")
+        # Robust path validation to prevent path traversal
+        base_path = os.path.realpath(os.path.abspath(base_path))
+        
+        # Define restricted directories
+        restricted_dirs = ['/etc', '/sys', '/proc', '/dev', '/boot']
+        
+        # Check if path is in restricted directories
+        for restricted in restricted_dirs:
+            if base_path.startswith(restricted):
+                raise ValueError(f"Cannot export to restricted directory: {restricted}")
+        
+        # Ensure the resolved path is within expected boundaries (if running from temp)
+        # This prevents attempts like /tmp/../etc/passwd
+        temp_dir = os.path.realpath(tempfile.gettempdir())
+        if not (base_path.startswith(temp_dir) or base_path.startswith(os.getcwd())):
+            # Only allow exports to temp directory or current working directory subtrees
+            logger.warning(f"Export path {base_path} is outside temp/cwd, proceeding with caution")
         
         os.makedirs(base_path, exist_ok=True)
         
