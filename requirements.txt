@@ -1,0 +1,3 @@
+# Security Stack Dependencies
+cryptography>=41.0.0  # For encryption of security event data
+
